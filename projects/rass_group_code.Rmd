@@ -1,0 +1,69 @@
+---
+title: "Project: The frequency of RASS Scores and Ventilation days"
+author: "RASS Group"
+output: pdf_document
+date: "09/24/2019"
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# If Needed:
+# install.packages("ggplot2")
+# install.packages("bigrquery")
+
+library("ggplot2")
+library("bigrquery")
+options(httr_oauth_cache="~/.httr-oauth")
+```
+
+
+```{r dbconnect, include=FALSE}
+# Load configuration settings
+library(dplyr)
+project_id <- "philips-eicu-meeting-2019"  # Change for billing
+#options(httr_oauth_cache=TRUE)
+
+
+con <- DBI::dbConnect(bigquery(), project = project_id)
+nc <- con %>% tbl("physionet-data.eicu_crd.nursecharting") %>%
+  filter(nursingchartvalue=="RASS") %>%
+  group_by(patientunitstayid) %>%
+  summarise(n=n())
+head(nc)
+
+ventdays <- con %>% tbl("physionet-data.eicu_crd.apachepatientresult") %>%
+  filter(apacheversion=="IVa", !is.na(predventdays)) %>%  select(patientunitstayid,actualventdays,predventdays) 
+head(ventdays)
+
+combined <- ventdays %>% 
+  left_join(nc,by="patientunitstayid")
+
+library(Hmisc)
+
+results <- combined %>% mutate(rass_fix = ifelse(is.na(n),0,n)) %>% collect(n=Inf) %>%
+  mutate(rass_group = cut2(rass_fix,c(seq(1,12),15,20,36,100))) %>% group_by(rass_group) %>% summarise(n=n(),A=sum(actualventdays),P=sum(predventdays),ratio=A/P)
+```
+
+# Plots of Results
+
+```{r someplots}
+results %>% 
+  ggplot(aes(rass_group,weight=n)) +
+  geom_bar()   +
+  xlab("Number of RASS Assessments") +
+  ylab("Number of Patients")
+
+results %>% 
+  ggplot(aes(rass_group,weight=A)) +
+  geom_bar() +
+  xlab("Number of RASS Assessments") +
+  ylab("Number of Actual Vent Days")
+
+results %>% 
+  ggplot(aes(rass_group,ratio)) +
+  geom_point() + 
+  xlab("Number of RASS Assessments") + 
+  ylab("A/P Ratio (Vent Days)") +
+  geom_hline(yintercept = 1,lty=3)
+```
